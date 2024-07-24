@@ -5,18 +5,10 @@
 
 int main() {
     Server server("127.0.0.1", 54000);
+    server.createTopic("topic1", 10);
+    server.createTopic("topic2", 2);
+    server.createTopic("topic3", 1);
+    std::thread(&Server::messageProcessing, std::ref(server)).detach();
     server.serverLoop();
-
-    //sf::TcpListener listener;
-    //sf::IpAddress ip("127.0.0.1");
-    //unsigned short port = 54000;
-
-
-    //std::cout << "Server is listening on " << ip.toString() << ":" << port << std::endl;
-
-
-
-    //std::cout << "New client connected: " << client.getRemoteAddress().toString() << std::endl;
-
 	return 0;
 }

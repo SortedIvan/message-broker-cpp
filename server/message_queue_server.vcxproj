@@ -139,11 +139,17 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\client\client.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\message\message.cpp" />
     <ClCompile Include="src\server\server.cpp" />
+    <ClCompile Include="src\topic\topic.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\client\client.hpp" />
+    <ClInclude Include="src\message\message.hpp" />
     <ClInclude Include="src\server\server.hpp" />
+    <ClInclude Include="src\topic\topic.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
