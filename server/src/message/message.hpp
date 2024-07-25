@@ -3,7 +3,6 @@
 #include <vector>
 #include <memory>
 
-
 struct ConnectionMessage {
 	bool isCorrect = false;
 	std::string clientId;
