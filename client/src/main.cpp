@@ -7,11 +7,12 @@
 
 Client initializeClient();
 void initializePublisherSubscriberArrays(Client& client);
-void receiver(const Client& client, bool& isConnected);
-void processCommand(const std::string& command);
-void sendMessage();
-void showAllReceived();
-void showAllSent();
+void receiver(Client& client, bool& isConnected);
+void processCommand(const std::string& command, Client& client, bool& isConnected);
+void sendMessage(Client& client, bool& isConnected);
+void showAllReceived(Client& client);
+void showAllSent(Client& client);
+bool establishConnection(const Client& client);
 
 int main() {
 	Client client;
@@ -34,25 +35,50 @@ int main() {
 		std::cout << "2) - View all sent" << std::endl;
 		std::cout << "3) - View all received" << std::endl;
 
-		processCommand(command);
+		std::cin >> command;
+
+		processCommand(command, client, isConnected);
 	}
 
 	return EXIT_SUCCESS;
 }
 
-void sendMessage() {
+void sendMessage(Client& client, bool& isConnected) {
+	sf::Packet message;
+	std::string data = "";
+	std::cout << "Input message data: ";
+	std::cin >> data;
 
+	if (data.size() == 0) {
+		return;
+	}
+
+	message << data;
+
+	std::cout << "Message is being sent to queue" << std::endl;
+	if (client.clientSocket->send(message) != sf::Socket::Done) {
+		std::cerr << "Problem with appending message to queue, breaking connection" << std::endl;
+		isConnected = false;
+		return;
+	}
+
+	std::cout << "Message appended to queue succesfully" << std::endl;
+	client.messageSentHistory.push_back(data);
 }
 
-void showAllReceived() {
-
+void showAllReceived(Client& client) {
+	for (int i = 0; i < client.messageReceivedHistory.size(); ++i) {
+		std::cout << client.messageReceivedHistory[i] << std::endl;
+	}
 }
 
-void showAllSent() {
-
+void showAllSent(Client& client) {
+	for (int i = 0; i < client.messageSentHistory.size(); ++i) {
+		std::cout << client.messageSentHistory[i] << std::endl;
+	}
 }
 
-void processCommand(const std::string& command) {
+void processCommand(const std::string& command, Client& client, bool& isConnected) {
 	try {
 		if (command.size() != 1
 			|| std::stoi(command) > 9 || std::stoi(command) < 1) {
@@ -62,13 +88,13 @@ void processCommand(const std::string& command) {
 
 		switch (std::stoi(command)) {
 			case 1:
-				sendMessage();
+				sendMessage(client, isConnected);
 				break;
 			case 2:
-				showAllSent();
+				showAllSent(client);
 				break;
 			case 3:
-				showAllReceived();
+				showAllReceived(client);
 				break;
 		}
 	}
@@ -77,9 +103,19 @@ void processCommand(const std::string& command) {
 	}
 }
 
-void receiver(const Client& client, bool& isConnected) {
+void receiver(Client& client, bool& isConnected) {
 	while (isConnected) {
+		sf::Packet incomingMessage;
+		if (client.clientSocket->receive(incomingMessage) != sf::Socket::Done) {
+			std::cerr << "Issue with receiving a message, terminating client connection" << std::endl;
+			isConnected = false;
+			break;
+		}
 
+		std::string data;
+		incomingMessage >> data;
+		client.messageReceivedHistory.push_back(data);
+		std::cout << "Message received: " << data << std::endl;
 	}
 }
 
@@ -116,7 +152,6 @@ bool establishConnection(const Client& client) {
 }
 
 void initializePublisherSubscriberArrays(Client& client) {
-
 	std::vector<std::string> publisherTo;
 	std::vector<std::string> subscriberTo;
 
@@ -152,9 +187,7 @@ void initializePublisherSubscriberArrays(Client& client) {
 	client.subscriberTo = subscriberTo;
 }
 
-
 Client initializeClient() {
-
 	bool clientInitialized = false;
 	bool clientIdCorrect = false;
 	bool clientIpCorrect = false;
@@ -183,6 +216,9 @@ Client initializeClient() {
 			std::cout << "Enter client ip: ";
 			std::cin >> clientIp;
 			clientIpCorrect = true;
+		}
+		else {
+			clientInitialized = true;
 		}
 	}
 
