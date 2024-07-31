@@ -75,7 +75,6 @@ void Server::manageNonEmptyTopic(std::string topicId) {
 		// process message here, send to all connected clients
 		for (auto client : connectedClients) {
 			if (client.second.subscriberTo.find(topicId) != client.second.subscriberTo.end()) {
-				
 				sf::Packet subscriberMessage;
 				subscriberMessage << message;
 
@@ -92,11 +91,12 @@ void Server::manageNonEmptyTopic(std::string topicId) {
 
 // TODO: Make this utilize a thread pool
 void Server::messageProcessing() {
-
 	while (serverIsRunning) {
 		for (auto& topic : topicMap) {
+
 			if (!topic.second.messages.empty() &&
-				topicsBeingProcessed.find(topic.first) == topicsBeingProcessed.end()){
+				topicsBeingProcessed.find(topic.first) == topicsBeingProcessed.end())
+			{
 				topicsBeingProcessed.insert(topic.first);
 				std::thread(&Server::manageNonEmptyTopic, this, topic.first).detach();
 			}
@@ -106,8 +106,11 @@ void Server::messageProcessing() {
 
 }
 
-// message structure
-// clientid|toTopic1:toTopic2...|content
+/*
+	@dev Message structure
+	Message structure is content | additional_header1 | additional_header2 ....
+	No need to store topics / client id since that is given in the client mapping
+*/
 Message Server::parseMessage(sf::Packet& message) {
 
 	Message wrongMessage;
@@ -115,84 +118,60 @@ Message Server::parseMessage(sf::Packet& message) {
 
 	Message parsed;
 	std::string data;
+	std::string messageContent;
+	std::vector<Header> headers;
 	int dataPointer = 0;
-	std::string clientId = "";
-	std::string content = "";
-	std::string topic = "";
-	std::vector<std::string> toTopics;
-
-
+	
 	if (!(message >> data))
 	{
 		return wrongMessage;
 	}
 
-	// collect the client id
+	// Collect message content
 	while (dataPointer < data.size()) {
 		if (data[dataPointer] == '|') {
 			dataPointer++;
 			break;
 		}
 		else {
-			clientId.push_back(data[dataPointer]);
+			messageContent += data[dataPointer];
 			dataPointer++;
 		}
 	}
 
-
-	if (clientId.size() != CLIENT_ID_SIZE) {
-
+	if (messageContent.size() == 0) {
 		return wrongMessage;
 	}
 
-	// collect all topics
+	std::string headerContent = "";
+	// Collect additional headers
 	while (dataPointer < data.size()) {
 		if (data[dataPointer] == '|') {
-			if (topic.size() == TOPIC_ID_SIZE) {
-				toTopics.push_back(topic);
+
+			if (headerContent.size() > 0) {
+				headers.push_back(processHeader(headerContent));
+				headerContent = "";
 			}
 
 			dataPointer++;
-
-			break;
-		}
-		else if (data[dataPointer] == ':') {
-			if (topic.size() != TOPIC_ID_SIZE) {
-
-				parsed.isCorrect = false;
-				return parsed;
-			}
-
-			toTopics.push_back(topic);
-			topic = "";
 		}
 		else {
-			topic.push_back(data[dataPointer]);
+			headerContent += data[dataPointer];
 			dataPointer++;
 		}
 	}
-
-	while (dataPointer < data.size()) {
-		content += data[dataPointer];
-		dataPointer++;
-	}
-
-	if (content.size() == 0) {
-		return wrongMessage;
-	}
-
-	// finally, verify the topic ids are correct
-	for (int i = 0; i < toTopics.size(); ++i) {
-		if (topicMap.find(toTopics[i]) == topicMap.end()) {
-			return wrongMessage;
-		}
-	}
-
-	parsed.clientId = clientId;
-	parsed.content = content;
-	parsed.toTopics = toTopics;
+	
 	parsed.isCorrect = true;
+	parsed.content = messageContent;
+	parsed.headers = headers;
 	return parsed;
+}
+
+// TODO: Add processing of additional headers
+Header Server::processHeader(std::string headerContent) {
+	Header header;
+	header.content = headerContent;
+	return header;
 }
 
 void Server::createTopic(std::string topicId, int maxAllowedConnections) {
@@ -207,9 +186,11 @@ void Server::serverClientThread(std::string clientId) {
 		auto client = connectedClients[clientId];
 
 		sf::Packet packet;
-
+		
 		if (client.clientSocket->receive(packet) != sf::Socket::Done)
 		{
+			std::cout << "Error with message receiving from client" << std::endl;
+
 			break;
 		}
 		
@@ -219,8 +200,10 @@ void Server::serverClientThread(std::string clientId) {
 			break;
 		}
 
-		for (int i = 0; i < message.toTopics.size(); ++i) {
-			topicMap[message.toTopics[i]].messages.push(message.content);
+		std::cout << connectedClients[clientId].publisherTo.size() << std::endl;
+
+		for (std::string topic : connectedClients[clientId].publisherTo) {
+			topicMap[topic].messages.push(message.content);
 		}
 	}
 }
@@ -234,7 +217,6 @@ ConnectionMessage Server::parseConnectionPacket(sf::Packet& connectionPacket) {
 		connectionMessage.isCorrect = false;
 		return connectionMessage;
 	}
-
 
 	std::string clientId = "";
 	std::vector<std::string> publisherTo;

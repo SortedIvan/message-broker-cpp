@@ -41,4 +41,5 @@ public:
     Message parseMessage(sf::Packet& message);
     void messageProcessing();
     void manageNonEmptyTopic(std::string topicId);
+    Header processHeader(std::string headerContent);
 };

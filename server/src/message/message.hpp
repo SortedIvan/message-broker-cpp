@@ -10,9 +10,12 @@ struct ConnectionMessage {
 	std::vector<std::string> subscriberTo;
 };
 
+struct Header {
+	std::string content; // template for now
+};
+
 struct Message {
 	bool isCorrect = false;
-	std::string clientId;
-	std::vector<std::string> toTopics;
 	std::string content;
+	std::vector<Header> headers;
 };

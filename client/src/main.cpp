@@ -1,7 +1,9 @@
 #include <iostream>
 #include <thread>
+#include <unordered_set>
 #include "SFML/Network.hpp"
 #include "client/client.hpp"
+
 
 #define CLIENT_ID_SIZE 4
 
@@ -36,20 +38,21 @@ int main() {
 		std::cout << "3) - View all received" << std::endl;
 
 		std::cin >> command;
-
+		std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Clear newline character
 		processCommand(command, client, isConnected);
 	}
 
 	return EXIT_SUCCESS;
 }
-
 void sendMessage(Client& client, bool& isConnected) {
 	sf::Packet message;
 	std::string data = "";
 	std::cout << "Input message data: ";
-	std::cin >> data;
+	std::getline(std::cin, data); // Read full line including spaces
+	std::cout << std::endl;
 
-	if (data.size() == 0) {
+	if (data.empty()) {
+		std::cout << "No message entered." << std::endl;
 		return;
 	}
 
@@ -62,7 +65,7 @@ void sendMessage(Client& client, bool& isConnected) {
 		return;
 	}
 
-	std::cout << "Message appended to queue succesfully" << std::endl;
+	std::cout << "Message appended to queue successfully" << std::endl;
 	client.messageSentHistory.push_back(data);
 }
 
@@ -121,27 +124,33 @@ void receiver(Client& client, bool& isConnected) {
 
 bool establishConnection(const Client& client) {
 	std::string connectionMessage = client.clientId + "|";
+	int publisherSize = client.publisherTo.size();
+	int subscriberSize = client.subscriberTo.size();
+	int pointer = 0;
 
-	for (int i = 0; i < client.publisherTo.size(); ++i) {
-		connectionMessage += client.publisherTo[i];
-
-		if (i != client.publisherTo.size() - 1) {
-			connectionMessage += ":";
+	for (auto topic : client.publisherTo) {
+		connectionMessage += topic;
+		pointer++;
+		if (pointer < publisherSize) {
+			connectionMessage += ':';
 		}
 	}
 
 	connectionMessage += "|";
+	pointer = 0;
 
-	for (int i = 0; i < client.subscriberTo.size(); ++i) {
-		connectionMessage += client.subscriberTo[i];
-
-		if (i != client.subscriberTo.size() - 1) {
-			connectionMessage += ":";
+	for (auto topic : client.subscriberTo) {
+		connectionMessage += topic;
+		pointer++;
+		if (pointer < subscriberSize) {
+			connectionMessage += ':';
 		}
 	}
 
 	sf::Packet connectionPacket;
 	connectionPacket << connectionMessage;
+
+	std::cout << connectionMessage << std::endl;
 
 	if (client.clientSocket->send(connectionPacket) != sf::Socket::Done) {
 		std::cerr << "There was an error connecting the client. Please try again" << std::endl;
@@ -152,8 +161,8 @@ bool establishConnection(const Client& client) {
 }
 
 void initializePublisherSubscriberArrays(Client& client) {
-	std::vector<std::string> publisherTo;
-	std::vector<std::string> subscriberTo;
+	std::unordered_set<std::string> publisherTo;
+	std::unordered_set<std::string> subscriberTo;
 
 	while (true) {
 		std::string publishTo = "";
@@ -161,11 +170,16 @@ void initializePublisherSubscriberArrays(Client& client) {
 		std::cout << "Please enter topic to publish to: ";
 		std::cin >> publishTo;
 
-		if (publishTo.find("*")) {
+		if (publishTo.find('*') != std::string::npos) {
 			break;
 		}
 		else {
-			publisherTo.push_back(publishTo);
+			if (publisherTo.find(publishTo) != publisherTo.end()) {
+				std::cout << "Topic already added!" << std::endl;
+			}
+			else {
+				publisherTo.insert(publishTo);
+			}
 		}
 	}
 
@@ -175,11 +189,16 @@ void initializePublisherSubscriberArrays(Client& client) {
 		std::cout << "Please enter topic to subscribe to to: ";
 		std::cin >> subscribeTo;
 
-		if (subscribeTo.find("*")) {
+		if (subscribeTo.find('*') != std::string::npos) {
 			break;
 		}
 		else {
-			subscriberTo.push_back(subscribeTo);
+			if (subscriberTo.find(subscribeTo) != subscriberTo.end()) {
+				std::cout << "Topic already added!" << std::endl;
+			}
+			else {
+				subscriberTo.insert(subscribeTo);
+			}
 		}
 	}
 
