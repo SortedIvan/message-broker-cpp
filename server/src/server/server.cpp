@@ -1,6 +1,5 @@
 #include "server.hpp"
 
-
 Server::Server(std::string _ip, unsigned int _port) {
 	ip = _ip;
 	port = _port;
@@ -81,12 +80,12 @@ void Server::manageNonEmptyTopic(std::string topicId) {
 		for (auto client : connectedClients) {
 			if (client.second.subscriberTo.find(topicId) != client.second.subscriberTo.end()) {
 				sf::Packet subscriberMessage;
-				subscriberMessage << message.content;
+				//subscriberMessage << message.content;
 
-				if (client.second.clientSocket->send(subscriberMessage) != sf::Socket::Done) {
-					// delete client here
-					std::cout << "Error sending message to client" << std::endl;
-				}
+				//if (client.second.clientSocket->send(subscriberMessage) != sf::Socket::Done) {
+				//	// delete client here
+				//	std::cout << "Error sending message to client" << std::endl;
+				//}
 			}
 		}
 	}
@@ -111,7 +110,7 @@ void Server::messageProcessing() {
 
 /*
 	@dev Message structure
-	Message structure is content | additional_header1 | additional_header2 ....
+	{message_type_id | content | additional_header_1 | additional_header_2 | ... | additional_header_n}
 	No need to store topics / client id since that is given in the client mapping
 */
 Message Server::parseMessage(sf::Packet& message) {
@@ -168,6 +167,79 @@ Message Server::parseMessage(sf::Packet& message) {
 	parsed.content = messageContent;
 	parsed.headers = headers;
 	return parsed;
+}
+
+// The structure of any message should be
+// {<message_action_id>:<message_content>:<additional_header_1>:<additional_header_2>:...:<additional_header_n>}
+Message parseMessage(sf::Packet& packet) {
+	Message message;
+	Message wrongMessage;
+	wrongMessage.isCorrect = false;
+	std::string data;
+	int dataPointer = 0;
+
+	if (!(packet >> data)) return wrongMessage;
+	if (data.size() == 0) return wrongMessage;
+
+	// first, process the action_id
+	std::string action_id_str = EMPTY_STR;
+
+	while (dataPointer < data.size()) {
+		if (data[dataPointer] == ':') {
+			dataPointer++;
+			break;
+		}
+
+		action_id_str.push_back(data[dataPointer]);
+		dataPointer++;
+	}
+
+	if (action_id_str.size() > MESSAGE_ACTION_ID_SIZE) return wrongMessage;
+	
+	try {
+		
+	}
+	catch (std::exception& ex) {
+		std::cout << ex.what() << std::endl;
+		return wrongMessage;
+	}
+
+	return message;
+}
+
+/*
+	Creates the structure of the json based on the message type
+*/
+nlohmann::json Server::processMessageContent(MessageActionType actionType,std::string messageContent) {
+	nlohmann::json content;
+
+	switch (actionType) {
+		case None:
+			return content;
+		case Connect:
+			parseConnectMessage(content, messageContent);
+			break;
+		case Disconnect:
+			parseDisconnectMessage(content, messageContent);
+			break;
+		case SimpleMessage:
+			parseSimpleMessage(content, messageContent);
+			break;
+	}
+
+	return content;
+}
+
+void Server::parseConnectMessage(nlohmann::json& content, std::string messageContent) {
+	
+}
+
+void Server::parseDisconnectMessage(nlohmann::json& content, std::string messageContent) {
+
+}
+
+void Server::parseSimpleMessage(nlohmann::json& content, std::string messageContent) {
+
 }
 
 // TODO: Add processing of additional headers

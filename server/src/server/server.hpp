@@ -13,7 +13,9 @@
 #include <unordered_set>
 
 #define CLIENT_ID_SIZE 4
+#define MESSAGE_ACTION_ID_SIZE 4 // there can be at most 9999 actions
 #define TOPIC_ID_SIZE 6
+#define EMPTY_STR ""
 
 /*
     @param listener: Represents a TCP socket object that is configured to listen for new clients
@@ -42,4 +44,9 @@ public:
     void messageProcessing();
     void manageNonEmptyTopic(std::string topicId);
     Header processHeader(std::string headerContent);
+    nlohmann::json processMessageContent(MessageActionType actionType,std::string messageContent);
+
+    void parseConnectMessage(nlohmann::json& content, std::string messageContent);
+    void parseDisconnectMessage(nlohmann::json& content, std::string messageContent);
+    void parseSimpleMessage(nlohmann::json& content, std::string messageContent);
 };
