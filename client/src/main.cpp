@@ -36,6 +36,7 @@ int main() {
 		std::cout << "1) - Send a message" << std::endl; 
 		std::cout << "2) - View all sent" << std::endl;
 		std::cout << "3) - View all received" << std::endl;
+		std::cout << "4) - Disconnect" << std::endl;
 
 		std::cin >> command;
 		std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Clear newline character
@@ -44,6 +45,12 @@ int main() {
 
 	return EXIT_SUCCESS;
 }
+
+void signalDisconnect(Client& client) {
+	sf::Packet packet;
+
+}
+
 void sendMessage(Client& client, bool& isConnected) {
 	sf::Packet message;
 	std::string data = "";

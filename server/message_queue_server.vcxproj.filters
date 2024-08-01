@@ -24,9 +24,6 @@
     <ClCompile Include="src\topic\topic.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\message\message.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\client\client.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

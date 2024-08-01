@@ -72,11 +72,16 @@ void Server::manageNonEmptyTopic(std::string topicId) {
 	while (!topicMap[topicId].messages.empty()) {
 		auto message = topicMap[topicId].messages.front();
 		topicMap[topicId].messages.pop();
+
+		if (message.content.empty()) {
+			continue;
+		}
+
 		// process message here, send to all connected clients
 		for (auto client : connectedClients) {
 			if (client.second.subscriberTo.find(topicId) != client.second.subscriberTo.end()) {
 				sf::Packet subscriberMessage;
-				subscriberMessage << message;
+				subscriberMessage << message.content;
 
 				if (client.second.clientSocket->send(subscriberMessage) != sf::Socket::Done) {
 					// delete client here
@@ -102,8 +107,6 @@ void Server::messageProcessing() {
 			}
 		}
 	}
-
-
 }
 
 /*
@@ -139,10 +142,6 @@ Message Server::parseMessage(sf::Packet& message) {
 		}
 	}
 
-	if (messageContent.size() == 0) {
-		return wrongMessage;
-	}
-
 	std::string headerContent = "";
 	// Collect additional headers
 	while (dataPointer < data.size()) {
@@ -159,6 +158,10 @@ Message Server::parseMessage(sf::Packet& message) {
 			headerContent += data[dataPointer];
 			dataPointer++;
 		}
+	}
+
+	if (messageContent.empty() && headers.empty()) {
+		return wrongMessage;
 	}
 	
 	parsed.isCorrect = true;
@@ -200,10 +203,8 @@ void Server::serverClientThread(std::string clientId) {
 			break;
 		}
 
-		std::cout << connectedClients[clientId].publisherTo.size() << std::endl;
-
 		for (std::string topic : connectedClients[clientId].publisherTo) {
-			topicMap[topic].messages.push(message.content);
+			topicMap[topic].messages.push(message);
 		}
 	}
 }
