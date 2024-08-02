@@ -11,6 +11,8 @@
 #include <thread>
 #include <set>
 #include <unordered_set>
+#include <utility>
+
 
 #define CLIENT_ID_SIZE 4
 #define MESSAGE_ACTION_ID_SIZE 4 // there can be at most 9999 actions
@@ -39,14 +41,18 @@ public:
     void startServer();
     void serverClientThread(std::string clientId);
     void createTopic(std::string topicId, int maxAllowedConnections);
-    ConnectionMessage parseConnectionPacket(sf::Packet& connectionPacket);
-    Message parseMessage(sf::Packet& message);
-    void messageProcessing();
     void manageNonEmptyTopic(std::string topicId);
+    
+    // Processing
     Header processHeader(std::string headerContent);
-    nlohmann::json processMessageContent(MessageActionType actionType,std::string messageContent);
+    bool processMessageContent(nlohmann::json& content,MessageActionType actionType,std::string messageContent);
+    void messageProcessing();
+    void processMessage(Message& message);
+    ConnectedClient connectClient(Message& message);
 
-    void parseConnectMessage(nlohmann::json& content, std::string messageContent);
-    void parseDisconnectMessage(nlohmann::json& content, std::string messageContent);
-    void parseSimpleMessage(nlohmann::json& content, std::string messageContent);
+    // Parsing
+    Message parseMessage(sf::Packet& message);
+    bool parseConnectMessage(nlohmann::json& content, std::string messageContent);
+    ConnectionMessage parseConnectionPacket(sf::Packet& connectionPacket);
+    bool parseSimpleMessage(nlohmann::json& content, std::string messageContent);
 };

@@ -25,45 +25,29 @@ void Server::serverLoop() {
 		sf::Packet connectionPacket; // has a specific structure, should not connect player if it doesn't match
 
 		// check the connection message from the client
-		if (client->receive(connectionPacket) != sf::Socket::Done)
-		{
-			std::cerr << "Error: Could not processes connection packet from client" << std::endl;
+		//if (client->receive(connectionPacket) != sf::Socket::Done)
+		//{
+		//	std::cerr << "Error: Could not processes connection packet from client" << std::endl;
+		//	continue;
+		//}
+
+		Message message = parseMessage(connectionPacket);
+
+		if (!message.isCorrect) {
+			continue;
+		}
+		
+		if (message.messageActionType != Connect) {
 			continue;
 		}
 
-		ConnectionMessage connectionMessage = parseConnectionPacket(connectionPacket);
+		ConnectedClient connectedClient = connectClient(message);
 
-		if (!connectionMessage.isCorrect) {
-			continue;
-		}
+		std::string client_id = message.content["client_id"];
 
-		std::unordered_set<std::string> subscriberSet;
-		std::unordered_set<std::string> publisherSet;
-
-		// if the topic ids don't relate to any topics, don't add client
-		for (int i = 0; i < connectionMessage.publisherTo.size(); ++i) {
-			if (topicMap.find(connectionMessage.publisherTo[i]) == topicMap.end()) {
-				continue;
-			}
-
-			publisherSet.insert(connectionMessage.publisherTo[i]);
-		}
-
-		for (int i = 0; i < connectionMessage.subscriberTo.size(); ++i) {
-			if (topicMap.find(connectionMessage.subscriberTo[i]) == topicMap.end()) {
-				continue;
-			}
-
-			subscriberSet.insert(connectionMessage.subscriberTo[i]);
-		}
-
-		ConnectedClient connectedClient;
-		connectedClient.clientSocket = client;
-		connectedClient.subscriberTo = subscriberSet;
-		connectedClient.publisherTo = publisherSet;
-		connectedClients.insert({ connectionMessage.clientId, std::move(connectedClient)});
+		connectedClients.insert({client_id , std::move(connectedClient)});
 		std::cout << "Client connected" << std::endl;
-		std::thread(&Server::serverClientThread, this, connectionMessage.clientId).detach();
+		std::thread(&Server::serverClientThread, this, client_id).detach();
 	}
 }
 
@@ -108,75 +92,16 @@ void Server::messageProcessing() {
 	}
 }
 
-/*
-	@dev Message structure
-	{message_type_id | content | additional_header_1 | additional_header_2 | ... | additional_header_n}
-	No need to store topics / client id since that is given in the client mapping
-*/
-Message Server::parseMessage(sf::Packet& message) {
-
-	Message wrongMessage;
-	wrongMessage.isCorrect = false;
-
-	Message parsed;
-	std::string data;
-	std::string messageContent;
-	std::vector<Header> headers;
-	int dataPointer = 0;
-	
-	if (!(message >> data))
-	{
-		return wrongMessage;
-	}
-
-	// Collect message content
-	while (dataPointer < data.size()) {
-		if (data[dataPointer] == '|') {
-			dataPointer++;
-			break;
-		}
-		else {
-			messageContent += data[dataPointer];
-			dataPointer++;
-		}
-	}
-
-	std::string headerContent = "";
-	// Collect additional headers
-	while (dataPointer < data.size()) {
-		if (data[dataPointer] == '|') {
-
-			if (headerContent.size() > 0) {
-				headers.push_back(processHeader(headerContent));
-				headerContent = "";
-			}
-
-			dataPointer++;
-		}
-		else {
-			headerContent += data[dataPointer];
-			dataPointer++;
-		}
-	}
-
-	if (messageContent.empty() && headers.empty()) {
-		return wrongMessage;
-	}
-	
-	parsed.isCorrect = true;
-	parsed.content = messageContent;
-	parsed.headers = headers;
-	return parsed;
-}
 
 // The structure of any message should be
 // {<message_action_id>:<message_content>:<additional_header_1>:<additional_header_2>:...:<additional_header_n>}
-Message parseMessage(sf::Packet& packet) {
+Message Server::parseMessage(sf::Packet& packet) {
 	Message message;
 	Message wrongMessage;
 	wrongMessage.isCorrect = false;
 	std::string data;
 	int dataPointer = 0;
+	MessageActionType actionType = None;
 
 	if (!(packet >> data)) return wrongMessage;
 	if (data.size() == 0) return wrongMessage;
@@ -197,10 +122,25 @@ Message parseMessage(sf::Packet& packet) {
 	if (action_id_str.size() > MESSAGE_ACTION_ID_SIZE) return wrongMessage;
 	
 	try {
-		
+		actionType = (MessageActionType)std::stoi(action_id_str);
 	}
 	catch (std::exception& ex) {
 		std::cout << ex.what() << std::endl;
+		return wrongMessage;
+	}
+
+	std::string messageContent = EMPTY_STR;
+
+	while (dataPointer < data.size()) {
+		messageContent += data[dataPointer];
+		dataPointer++;
+	}
+
+	nlohmann::json jsonContent;
+
+	bool result = processMessageContent(jsonContent, actionType, messageContent);
+
+	if (!result) {
 		return wrongMessage;
 	}
 
@@ -210,36 +150,126 @@ Message parseMessage(sf::Packet& packet) {
 /*
 	Creates the structure of the json based on the message type
 */
-nlohmann::json Server::processMessageContent(MessageActionType actionType,std::string messageContent) {
-	nlohmann::json content;
+bool Server::processMessageContent(nlohmann::json& jsonContent, MessageActionType actionType,std::string messageContent) {
+	bool result = false;
 
 	switch (actionType) {
 		case None:
-			return content;
+			return false;
 		case Connect:
-			parseConnectMessage(content, messageContent);
+			result = parseConnectMessage(jsonContent, messageContent);
 			break;
-		case Disconnect:
-			parseDisconnectMessage(content, messageContent);
+		case Disconnect: // Disconnecting has no content attached to it
+			return true;
 			break;
 		case SimpleMessage:
-			parseSimpleMessage(content, messageContent);
+			result = parseSimpleMessage(jsonContent, messageContent);
 			break;
 	}
 
-	return content;
+	return result;
 }
 
-void Server::parseConnectMessage(nlohmann::json& content, std::string messageContent) {
+/*
+	connect message should contain the information about client and the topics he subscribes to
+	structure: {<client_id>|<topic_pub_1>-<topic_pub_2>...|<topic_sub_1>-<topic_sub_2>..}
+*/ 
+bool Server::parseConnectMessage(nlohmann::json& jsonContent, std::string messageContent) {
+	int contentPointer = 0;
+	std::string clientId = EMPTY_STR;
+	std::vector<std::string> subscribeTo;
+	std::vector<std::string> publishTo;
+
+	while (contentPointer < messageContent.size()) {
+		if (messageContent[contentPointer] == '|') {
+			contentPointer++;
+			break;
+		}
+
+		clientId += messageContent[contentPointer];
+		contentPointer++;
+	}
+
+	if (clientId.size() != CLIENT_ID_SIZE) {
+		return false;
+	}
+
+	std::string pb = EMPTY_STR;
 	
+	while (contentPointer < messageContent.size()) {
+		if (messageContent[contentPointer] == '-') {
+			publishTo.push_back(pb);
+			contentPointer++;
+			pb = EMPTY_STR;
+		}
+		else if (messageContent[contentPointer] == '|') {
+			contentPointer++;
+			
+			if (pb.size() > 0) {
+				publishTo.push_back(pb);
+			}
+
+			break;
+		}
+		else {
+			pb += messageContent[contentPointer];
+			contentPointer++;
+		}
+	}
+
+	std::string sb = EMPTY_STR;
+
+	while (contentPointer < messageContent.size()) {
+		if (messageContent[contentPointer] == '-') {
+			subscribeTo.push_back(sb);
+			contentPointer++;
+			sb = EMPTY_STR;
+		}
+		else {
+			sb += messageContent[contentPointer];
+			contentPointer++;
+		}
+	}
+
+	if (sb.size() > 0) {
+		publishTo.push_back(sb);
+	}
+
+	if (subscribeTo.size() == 0 && publishTo.size() == 0) {
+		return false;
+	}
+
+	jsonContent["client_id"] = clientId;
+	jsonContent["publish_to"] = publishTo;
+	jsonContent["subscribe_to"] = subscribeTo;
+	return true;
 }
 
-void Server::parseDisconnectMessage(nlohmann::json& content, std::string messageContent) {
+/*
+	Boilerplate method for a message that contains content
+	@structure {"message":<content>}
+*/
+bool Server::parseSimpleMessage(nlohmann::json& jsonContent, std::string messageContent) {
+	int contentPointer = 0;
+	std::string contentStr = EMPTY_STR;
 
-}
+	while (contentPointer < messageContent.size()) {
+		
+		if (messageContent[contentPointer] == ':') {
+			contentPointer++;
+			break;
+		}
 
-void Server::parseSimpleMessage(nlohmann::json& content, std::string messageContent) {
+		contentStr += messageContent[contentPointer];
+		contentPointer++;
+	}
 
+	if (contentStr.size() == 0) {
+		return false;
+	}
+
+	jsonContent["message"] = contentStr;
+	return true;
 }
 
 // TODO: Add processing of additional headers
@@ -256,6 +286,10 @@ void Server::createTopic(std::string topicId, int maxAllowedConnections) {
 	topicMap.insert({ topicId, topic });
 }
 
+/*
+	@dev represents a thread function that is responsible for managing receiving messages from each client
+	TODO: rework to a more extendable system
+*/
 void Server::serverClientThread(std::string clientId) {
 	while (serverIsRunning) {
 		auto client = connectedClients[clientId];
@@ -274,12 +308,52 @@ void Server::serverClientThread(std::string clientId) {
 		if (!message.isCorrect) {
 			break;
 		}
+		
+		// process message here
 
-		for (std::string topic : connectedClients[clientId].publisherTo) {
-			topicMap[topic].messages.push(message);
-		}
+
 	}
 }
+
+void Server::processMessage(Message& message) {
+	switch (message.messageActionType) {
+		case None:
+			return;
+		case Connect:
+			connectClient(message);
+	}
+}
+
+ConnectedClient Server::connectClient(Message& message) {
+	std::unordered_set<std::string> subscriberSet;
+	std::unordered_set<std::string> publisherSet;
+	std::vector<std::string> publishTo = message.content["publish_to"];
+	std::vector<std::string> subscribeTo = message.content["subscribe_to"];
+
+	// if the topic ids don't relate to any topics, don't add client
+	for (int i = 0; i < publishTo.size(); ++i) {
+		if (topicMap.find(publishTo[i]) == topicMap.end()) {
+			continue;
+		}
+
+		publisherSet.insert(publishTo[i]);
+	}
+
+	for (int i = 0; i < subscribeTo.size(); ++i) {
+		if (topicMap.find(subscribeTo[i]) == topicMap.end()) {
+			continue;
+		}
+
+		subscriberSet.insert(subscribeTo[i]);
+	}
+
+	ConnectedClient connectedClient;
+	connectedClient.subscriberTo = subscriberSet;
+	connectedClient.publisherTo = publisherSet;
+
+	return connectedClient;
+}
+
 
 ConnectionMessage Server::parseConnectionPacket(sf::Packet& connectionPacket) {
 	ConnectionMessage connectionMessage;
