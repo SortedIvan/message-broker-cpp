@@ -22,32 +22,7 @@ void Server::serverLoop() {
 			continue;
 		}
 
-		sf::Packet connectionPacket; // has a specific structure, should not connect player if it doesn't match
-
-		// check the connection message from the client
-		//if (client->receive(connectionPacket) != sf::Socket::Done)
-		//{
-		//	std::cerr << "Error: Could not processes connection packet from client" << std::endl;
-		//	continue;
-		//}
-
-		Message message = parseMessage(connectionPacket);
-
-		if (!message.isCorrect) {
-			continue;
-		}
-		
-		if (message.messageActionType != Connect) {
-			continue;
-		}
-
-		ConnectedClient connectedClient = connectClient(message);
-
-		std::string client_id = message.content["client_id"];
-
-		connectedClients.insert({client_id , std::move(connectedClient)});
-		std::cout << "Client connected" << std::endl;
-		std::thread(&Server::serverClientThread, this, client_id).detach();
+		std::thread(&Server::serverClientThread, this, client).detach();
 	}
 }
 
@@ -247,7 +222,7 @@ bool Server::parseConnectMessage(nlohmann::json& jsonContent, std::string messag
 
 /*
 	Boilerplate method for a message that contains content
-	@structure {"message":<content>}
+	@structure {"content":<content>}
 */
 bool Server::parseSimpleMessage(nlohmann::json& jsonContent, std::string messageContent) {
 	int contentPointer = 0;
@@ -268,7 +243,7 @@ bool Server::parseSimpleMessage(nlohmann::json& jsonContent, std::string message
 		return false;
 	}
 
-	jsonContent["message"] = contentStr;
+	jsonContent["content"] = contentStr;
 	return true;
 }
 
@@ -290,7 +265,31 @@ void Server::createTopic(std::string topicId, int maxAllowedConnections) {
 	@dev represents a thread function that is responsible for managing receiving messages from each client
 	TODO: rework to a more extendable system
 */
-void Server::serverClientThread(std::string clientId) {
+void Server::serverClientThread(std::shared_ptr<sf::TcpSocket> client) {
+
+	sf::Packet connectionPacket; // has a specific structure, should not connect if it doesn't match
+
+	// check the connection message from the client
+	if (client->receive(connectionPacket) != sf::Socket::Done)
+	{
+		std::cerr << "Error: Could not processes connection packet from client" << std::endl;
+		return;
+	}
+
+	Message message = parseMessage(connectionPacket);
+
+	if (!message.isCorrect) {
+		return;
+	}
+
+	if (message.messageActionType != Connect) {
+		return;
+	}
+
+	ConnectedClient connectedClient = connectClient(message);
+	std::string clientId = message.content["client_id"];
+	connectedClients.insert({clientId ,std::move(connectedClient) });
+
 	while (serverIsRunning) {
 		auto client = connectedClients[clientId];
 
@@ -311,16 +310,29 @@ void Server::serverClientThread(std::string clientId) {
 		
 		// process message here
 
-
+		bool result = processMessage(message, clientId);
 	}
 }
 
-void Server::processMessage(Message& message) {
+bool Server::processMessage(Message& message, const std::string& clientId) {
 	switch (message.messageActionType) {
 		case None:
-			return;
+			return false;
 		case Connect:
-			connectClient(message);
+			return false;
+		case Disconnect:
+			return false;
+		case SimpleMessage:
+			return processSimpleMessage(message, clientId);
+	}
+}
+
+//@structure {"content":<content>}
+// TODO: Figure out a way to actually send messages
+// Entire schema will have to change
+bool Server::processSimpleMessage(Message& message, const std::string& clientId) {
+	for (std::string pub : connectedClients[clientId].publisherTo) {
+		//topicMap[pub].messages.push()
 	}
 }
 

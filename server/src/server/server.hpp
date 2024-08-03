@@ -39,7 +39,7 @@ public:
     Server(std::string _ip, unsigned int _port);
     void serverLoop();
     void startServer();
-    void serverClientThread(std::string clientId);
+    void serverClientThread(std::shared_ptr<sf::TcpSocket> clientSocket);
     void createTopic(std::string topicId, int maxAllowedConnections);
     void manageNonEmptyTopic(std::string topicId);
     
@@ -47,8 +47,9 @@ public:
     Header processHeader(std::string headerContent);
     bool processMessageContent(nlohmann::json& content,MessageActionType actionType,std::string messageContent);
     void messageProcessing();
-    void processMessage(Message& message);
+    bool processMessage(Message& message, const std::string& clientId);
     ConnectedClient connectClient(Message& message);
+    bool processSimpleMessage(Message& message, const std::string& clientId);
 
     // Parsing
     Message parseMessage(sf::Packet& message);
