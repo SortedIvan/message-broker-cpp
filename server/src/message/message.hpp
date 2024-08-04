@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include "msgpack.hpp"
 #include "../src/json.hpp"
 
 
@@ -15,7 +16,6 @@ enum MessageActionType {
 };
 
 struct ConnectionMessage {
-	bool isCorrect = false;
 	std::string clientId;
 	std::vector<std::string> publisherTo;     // In the packet, these two are seperated by a "|"
 	std::vector<std::string> subscriberTo;
@@ -26,9 +26,9 @@ struct Header {
 };
 
 struct Message {
-	bool isCorrect = false;
-	MessageActionType messageActionType;
-	nlohmann::json content;
-	std::vector<Header> headers;
+	std::string sender;
+	int messageActionType;
+	std::vector<char> actionData;
+	std::vector<char> headers;
+	MSGPACK_DEFINE(sender, isCorrect, messageActionType, actionData, headers);
 };
-

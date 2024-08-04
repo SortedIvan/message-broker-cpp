@@ -2,8 +2,9 @@
 
 #include "SFML/Network.hpp"
 #include "../src/topic/topic.hpp"
-#include "../src/message/message.hpp"
 #include "../src/client/client.hpp"
+#include "../src/message/message_serializer.hpp"
+
 #include <string>
 #include <iostream>
 #include <vector>
@@ -12,7 +13,6 @@
 #include <set>
 #include <unordered_set>
 #include <utility>
-
 
 #define CLIENT_ID_SIZE 4
 #define MESSAGE_ACTION_ID_SIZE 4 // there can be at most 9999 actions
@@ -27,6 +27,7 @@
 */
 class Server {
 private:
+    MessageSerializer messageSerializer;
     sf::TcpListener listener;
     sf::IpAddress ip;
     unsigned short port;
@@ -51,8 +52,5 @@ public:
     ConnectedClient connectClient(Message& message);
 
     // Parsing
-    Message parseMessage(sf::Packet& message);
-    bool parseConnectMessage(nlohmann::json& content, std::string messageContent);
-    ConnectionMessage parseConnectionPacket(sf::Packet& connectionPacket);
-    bool parseSimpleMessage(nlohmann::json& content, std::string messageContent);
+    bool Server::parseMessage(sf::Packet& packet, Message& message);
 };

@@ -1,7 +1,9 @@
 #include "SFML/Graphics.hpp"
 #include "SFML/Network.hpp"
 #include "server/server.hpp"
+#include "msgpack.hpp"
 #include <iostream>
+#include <sstream>
 
 int main() {
     Server server("127.0.0.1", 54000);
