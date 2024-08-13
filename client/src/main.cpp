@@ -2,6 +2,8 @@
 #include <thread>
 #include <unordered_set>
 #include "SFML/Network.hpp"
+#include "message/message.hpp"
+#include "message/message_serializer.hpp"
 #include "client/client.hpp"
 
 
@@ -15,6 +17,9 @@ void sendMessage(Client& client, bool& isConnected);
 void showAllReceived(Client& client);
 void showAllSent(Client& client);
 bool establishConnection(const Client& client);
+void printMessage(const Message& message);
+bool processMessage(Message& message);
+
 
 int main() {
 	Client client;
@@ -51,8 +56,11 @@ void signalDisconnect(Client& client) {
 
 }
 
+/*
+	Sends a simple message into the message queue
+*/
 void sendMessage(Client& client, bool& isConnected) {
-	sf::Packet message;
+	sf::Packet messagePacket;
 	std::string data = "";
 	std::cout << "Input message data: ";
 	std::getline(std::cin, data); // Read full line including spaces
@@ -63,28 +71,40 @@ void sendMessage(Client& client, bool& isConnected) {
 		return;
 	}
 
-	message << data;
+	Message message;
+	message.sender = client.clientId;
+	message.messageActionType = SimpleMessage;
+	message.actionData = data;
 
-	std::cout << "Message is being sent to queue" << std::endl;
-	if (client.clientSocket->send(message) != sf::Socket::Done) {
+	std::string serializedMessage = serialize<Message>(message);
+
+	messagePacket << serializedMessage;
+	
+	if (client.clientSocket->send(messagePacket) != sf::Socket::Done) {
 		std::cerr << "Problem with appending message to queue, breaking connection" << std::endl;
 		isConnected = false;
 		return;
 	}
 
 	std::cout << "Message appended to queue successfully" << std::endl;
-	client.messageSentHistory.push_back(data);
+	client.messageSentHistory.push_back(message);
 }
 
 void showAllReceived(Client& client) {
 	for (int i = 0; i < client.messageReceivedHistory.size(); ++i) {
-		std::cout << client.messageReceivedHistory[i] << std::endl;
+		printMessage(client.messageReceivedHistory[i]);
 	}
+}
+
+void printMessage(const Message& message) {
+	std::cout << "---------- Message ------------" << std::endl;
+	std::cout << "Sender: " << message.sender << std::endl;
+	std::cout << "Message data" << message.actionData << std::endl;
 }
 
 void showAllSent(Client& client) {
 	for (int i = 0; i < client.messageSentHistory.size(); ++i) {
-		std::cout << client.messageSentHistory[i] << std::endl;
+		printMessage(client.messageReceivedHistory[i]);
 	}
 }
 
@@ -123,46 +143,68 @@ void receiver(Client& client, bool& isConnected) {
 		}
 
 		std::string data;
-		incomingMessage >> data;
-		client.messageReceivedHistory.push_back(data);
-		std::cout << "Message received: " << data << std::endl;
+		if (!(incomingMessage >> data)) {
+			std::cerr << "Error with parsing incoming message data" << std::endl;
+			continue;
+		}
+
+		if (data.empty()) {
+			std::cerr << "Incoming message data is empty" << std::endl;
+			continue;
+		}
+
+		Message message;
+
+		try {
+			message = deserialize<Message>(data);
+			processMessage(message);
+		}
+		catch (const std::exception& ex) {
+			std::cerr << ex.what() << std::endl;
+		}
+	}
+}
+
+bool processMessage(Message& message) {
+	switch (message.messageActionType) {
+		case None:
+			return false;
+		case SimpleMessage:
+			std::cout << "Client: " << message.sender << " has sent {" << message.actionData << "}" << std::endl;
+			return true;
+		case Connect:
+			return true;
+		case Disconnect:
+			return true;
 	}
 }
 
 bool establishConnection(const Client& client) {
-	std::string connectionMessage = client.clientId + "|";
-	int publisherSize = client.publisherTo.size();
-	int subscriberSize = client.subscriberTo.size();
-	int pointer = 0;
+	ConnectionData connectionData;
+	connectionData.publisherTo = std::vector<std::string>(client.publisherTo.begin(), client.publisherTo.end());
+	connectionData.subscriberTo = std::vector<std::string>(client.subscriberTo.begin(), client.subscriberTo.end());
+	std::string serializedData = serialize<ConnectionData>(connectionData);
 
-	for (auto topic : client.publisherTo) {
-		connectionMessage += topic;
-		pointer++;
-		if (pointer < publisherSize) {
-			connectionMessage += ':';
-		}
+	if (serializedData.empty()) {
+		return false;
 	}
 
-	connectionMessage += "|";
-	pointer = 0;
+	Message connectionMessage;
+	connectionMessage.sender = client.clientId;
+	connectionMessage.messageActionType =(int)Connect;
+	connectionMessage.actionData = serializedData;
 
-	for (auto topic : client.subscriberTo) {
-		connectionMessage += topic;
-		pointer++;
-		if (pointer < subscriberSize) {
-			connectionMessage += ':';
-		}
-	}
+	std::string serializedMessage = serialize<Message>(connectionMessage);
 
 	sf::Packet connectionPacket;
-	connectionPacket << connectionMessage;
-
-	std::cout << connectionMessage << std::endl;
+	connectionPacket << serializedMessage;
 
 	if (client.clientSocket->send(connectionPacket) != sf::Socket::Done) {
 		std::cerr << "There was an error connecting the client. Please try again" << std::endl;
 		return false;
 	}
+
+	std::cout << serializedMessage << std::endl;
 
 	return true;
 }

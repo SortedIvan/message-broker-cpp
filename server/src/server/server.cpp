@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include "../src/message/message_serializer.hpp"
 
 Server::Server(std::string _ip, unsigned int _port) {
 	ip = _ip;
@@ -22,47 +23,178 @@ void Server::serverLoop() {
 			continue;
 		}
 
-		sf::Packet connectionPacket; // has a specific structure, should not connect player if it doesn't match
-		Message message;
-		bool parseResult = parseMessage(connectionPacket, message);
-
-		if (!parseResult) {
-			return;
-		}
-
-		if (message.messageActionType != Connect) {
-			continue;
-		}
-
-		//ConnectedClient connectedClient = connectClient(message);
-
-		//std::string client_id = message.content["client_id"];
-
-		//connectedClients.insert({client_id , std::move(connectedClient)});
-		//std::cout << "Client connected" << std::endl;
-		//std::thread(&Server::serverClientThread, this, client_id).detach();
+		std::thread(&Server::serverClientThread, this, std::move(client)).detach();
 	}
 }
 
-void Server::manageNonEmptyTopic(std::string topicId) {
-	while (!topicMap[topicId].messages.empty()) {
-		//auto message = topicMap[topicId].messages.front();
-		//topicMap[topicId].messages.pop();
+/*
+	@dev represents a thread function that is responsible for managing receiving messages from each client
+	TODO: add sending a message back to client to let them know if they connected succesfully
+*/
+void Server::serverClientThread(std::shared_ptr<sf::TcpSocket> clientSocket) {
 
-		//if (message.content.empty()) {
-		//	continue;
-		//}
+	std::cout << "Client is connecting" << std::endl;
+
+	// first, attempt to connect with the client before adding him to the connected clients
+	sf::Packet connectionPacket;
+
+	if (clientSocket->receive(connectionPacket) != sf::Socket::Done) {
+		std::cerr << "Error parsing the connection packet for the connecting client" << std::endl;
+	}
+
+	Message connectionMessage;
+	bool connectionParseResult = parsePacketIntoMessage(connectionPacket, connectionMessage);
+
+	if (!connectionParseResult) {
+		std::cerr << "Error parsing client connection message" << std::endl;
+		return;
+	}
+
+	if (connectionMessage.messageActionType != Connect) {
+		std::cerr << "Message not correct type" << std::endl;
+		return;
+	}
+
+
+	ConnectedClient connectedClient;
+	bool clientConnectionResult = connectClient(connectionMessage, connectedClient);
+
+	if (!clientConnectionResult) {
+		std::cerr << "Issue with connecting client" << std::endl;
+		return;
+	}
+
+	std::string clientId = connectionMessage.sender;
+	
+	if (clientId.size() != CLIENT_ID_SIZE) {
+		std::cerr << "Incorrect client id size" << std::endl;
+		return;
+	}
+	
+	connectedClient.clientId = clientId;
+	connectedClient.clientSocket = std::move(clientSocket);
+	connectedClients.insert({ clientId, std::move(connectedClient)});
+
+	while (serverIsRunning) {
+		sf::Packet packet;
+
+		connectedClient = connectedClients[clientId];
+
+		if (connectedClient.clientSocket->receive(packet) != sf::Socket::Done)
+		{
+			std::cerr << "Error with message receiving from client" << std::endl;
+			connectedClients.erase(clientId);
+			break;
+		}
+
+		Message message;
+		bool messageParseResult = parsePacketIntoMessage(packet, message);
+
+		if (!messageParseResult) {
+			std::cerr << "Client message could not be parsed correctly" << std::endl;
+			connectedClients.erase(clientId);
+			return;
+		}
+
+		/*
+			@dev process functionality
+			Manage any needed actions embedded in the message
+			& handle pushing messages into the appropriate topic
+		*/
+		bool processingResult = processMessage(message);
+
+		if (!processingResult) {
+			std::cerr << "There was an error processing a message" << std::endl;
+			connectedClients.erase(clientId);
+			return;
+		}
+
+	}
+
+	connectedClients.erase(clientId);
+}
+
+bool Server::processMessage(Message& message) {
+	bool processResult = false;
+
+	switch (message.messageActionType) {
+		case None:
+			return false;
+		case Connect:
+			return false;
+		case SimpleMessage:
+			processResult = processSimpleMessage(message);
+			break;
+	}
+
+	return processResult;
+}
+
+/*
+	@dev sample function for a client action
+	Simple message comes in the form of a string, does not need any further processing, just gets sent into the topic
+*/
+bool Server::processSimpleMessage(Message& message) {
+
+	for (auto connectedClient : connectedClients) {
+		std::cout << connectedClient.second.publisherTo.size() << std::endl;
+	}
+
+	for (std::string topic : connectedClients[message.sender].publisherTo) {
+		if (topicMap.find(topic) == topicMap.end()) {
+			// topic got deleted externally/by another thread, continue;
+			continue;
+		}
+		topicMap[topic].messages.push(message);
+	}
+
+	return true;
+}
+
+bool Server::connectClient(Message& message, ConnectedClient& client) {
+	try {
+		ConnectionData data = deserialize<ConnectionData>(message.actionData);
+
+		if (data.publisherTo.empty() && data.subscriberTo.empty()) {
+			return false;
+		}
+
+		client.subscriberTo = std::unordered_set<std::string>(data.subscriberTo.begin(), data.subscriberTo.end());
+		client.publisherTo = std::unordered_set<std::string>(data.publisherTo.begin(), data.publisherTo.end());
+		return true;
+	}
+	catch (std::exception& ex) {
+		return false;
+	}
+	return false;
+}
+
+
+void Server::processMessagesFromNonEmptyTopic(std::string topicId) {
+	while (!topicMap[topicId].messages.empty()) {
+		auto message = topicMap[topicId].messages.front();
+		topicMap[topicId].messages.pop();
 
 		// process message here, send to all connected clients
 		for (auto client : connectedClients) {
 			if (client.second.subscriberTo.find(topicId) != client.second.subscriberTo.end()) {
 				sf::Packet subscriberMessage;
-				//subscriberMessage << message.content;
+				std::string messageData = EMPTY_STR;
+				// serialize message into a string
 
-				//if (client.second.clientSocket->send(subscriberMessage) != sf::Socket::Done) {
-				//	// delete client here
-				//	std::cout << "Error sending message to client" << std::endl;
-				//}
+				try {
+					messageData = serialize<Message>(message);
+					subscriberMessage << messageData;
+
+					if (client.second.clientSocket->send(subscriberMessage) != sf::Socket::Done) {
+						// delete client here
+						std::cout << "Error sending message to client" << std::endl;
+					}
+				}
+				catch (const std::exception& ex) {
+					std::cerr << ex.what() << std::endl;
+					// optionally, remove the client that sent the broken message
+				}
 			}
 		}
 	}
@@ -70,8 +202,11 @@ void Server::manageNonEmptyTopic(std::string topicId) {
 	topicsBeingProcessed.erase(topicId);
 }
 
-// TODO: Make this utilize a thread pool
-void Server::messageProcessing() {
+/*
+	@dev uses a task thread to process a non empty topic
+	@todo make sure this uses a thread pool | make it an event based system, not constant looping
+*/ 
+void Server::processNonEmptyTopicThreadCreator() {
 	while (serverIsRunning) {
 		for (auto& topic : topicMap) {
 
@@ -79,16 +214,14 @@ void Server::messageProcessing() {
 				topicsBeingProcessed.find(topic.first) == topicsBeingProcessed.end())
 			{
 				topicsBeingProcessed.insert(topic.first);
-				std::thread(&Server::manageNonEmptyTopic, this, topic.first).detach();
+				std::thread(&Server::processMessagesFromNonEmptyTopic, this, topic.first).detach();
 			}
 		}
 	}
 }
 
 
-// The structure of any message should be
-// {<message_action_id>:<message_content>:<additional_header_1>:<additional_header_2>:...:<additional_header_n>}
-bool Server::parseMessage(sf::Packet& packet, Message& message) {
+bool Server::parsePacketIntoMessage(sf::Packet& packet, Message& message) {
 	std::string data;
 	int dataPointer = 0;
 	MessageActionType actionType = None;
@@ -99,36 +232,14 @@ bool Server::parseMessage(sf::Packet& packet, Message& message) {
 	Message serializedMessage;
 
 	try {
-		serializedMessage = messageSerializer.deserialize(packet);
+		serializedMessage = deserialize<Message>(data);
+		message = serializedMessage;
 		return true;
 	}
 	catch (const std::exception& ex) {
 		std::cerr << ex.what() << std::endl;
 	}
 	return false;
-}
-
-/*
-	Creates the structure of the json based on the message type
-*/
-bool Server::processMessageContent(nlohmann::json& jsonContent, MessageActionType actionType,std::string messageContent) {
-	bool result = false;
-
-	switch (actionType) {
-		case None:
-			return false;
-		case Connect:
-			//result = parseConnectMessage(jsonContent, messageContent);
-			break;
-		case Disconnect: // Disconnecting has no content attached to it
-			return true;
-			break;
-		case SimpleMessage:
-			//result = parseSimpleMessage(jsonContent, messageContent);
-			break;
-	}
-
-	return result;
 }
 
 // TODO: Add processing of additional headers
@@ -145,47 +256,4 @@ void Server::createTopic(std::string topicId, int maxAllowedConnections) {
 	topicMap.insert({ topicId, topic });
 }
 
-/*
-	@dev represents a thread function that is responsible for managing receiving messages from each client
-	TODO: rework to a more extendable system
-*/
-void Server::serverClientThread(std::string clientId) {
-	while (serverIsRunning) {
-		auto client = connectedClients[clientId];
 
-		sf::Packet packet;
-		
-		if (client.clientSocket->receive(packet) != sf::Socket::Done)
-		{
-			std::cout << "Error with message receiving from client" << std::endl;
-
-			break;
-		}
-		
-		Message message;
-		parseMessage(packet, message);
-		
-		// process message here
-
-
-	}
-}
-
-void Server::processMessage(Message& message) {
-	switch (message.messageActionType) {
-		case None:
-			return;
-		case Connect:
-			connectClient(message);
-	}
-}
-
-// 
-ConnectedClient Server::connectClient(Message& message) {
-	std::unordered_set<std::string> subscriberSet;
-	std::unordered_set<std::string> publisherSet;
-
-	ConnectedClient connectedClient;
-
-	return connectedClient;
-}

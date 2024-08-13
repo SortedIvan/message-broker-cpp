@@ -3,7 +3,6 @@
 #include "SFML/Network.hpp"
 #include "../src/topic/topic.hpp"
 #include "../src/client/client.hpp"
-#include "../src/message/message_serializer.hpp"
 
 #include <string>
 #include <iostream>
@@ -27,7 +26,6 @@
 */
 class Server {
 private:
-    MessageSerializer messageSerializer;
     sf::TcpListener listener;
     sf::IpAddress ip;
     unsigned short port;
@@ -39,19 +37,13 @@ private:
 public:
     Server(std::string _ip, unsigned int _port);
     void serverLoop();
-    void startServer();
     void serverClientThread(std::shared_ptr<sf::TcpSocket> clientSocket);
     void createTopic(std::string topicId, int maxAllowedConnections);
-    void manageNonEmptyTopic(std::string topicId);
-    
-    // Processing
+    void processMessagesFromNonEmptyTopic(std::string topicId);
     Header processHeader(std::string headerContent);
-    bool processMessageContent(nlohmann::json& content,MessageActionType actionType,std::string messageContent);
-    void messageProcessing();
-    bool processMessage(Message& message, const std::string& clientId);
-    ConnectedClient connectClient(Message& message);
-    bool processSimpleMessage(Message& message, const std::string& clientId);
-
-    // Parsing
-    bool Server::parseMessage(sf::Packet& packet, Message& message);
+    void processNonEmptyTopicThreadCreator();
+    bool processMessage(Message& message);
+    bool connectClient(Message& message, ConnectedClient& client);
+    bool processSimpleMessage(Message& message);
+    bool parsePacketIntoMessage(sf::Packet& packet, Message& message);
 };

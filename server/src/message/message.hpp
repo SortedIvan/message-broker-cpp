@@ -15,12 +15,6 @@ enum MessageActionType {
 	SimpleMessage = 3
 };
 
-struct ConnectionMessage {
-	std::string clientId;
-	std::vector<std::string> publisherTo;     // In the packet, these two are seperated by a "|"
-	std::vector<std::string> subscriberTo;
-};
-
 struct Header {
 	std::string content; // template for now
 };
@@ -28,7 +22,13 @@ struct Header {
 struct Message {
 	std::string sender;
 	int messageActionType;
-	std::vector<char> actionData;
+	std::string actionData;
 	std::vector<char> headers;
-	MSGPACK_DEFINE(sender, isCorrect, messageActionType, actionData, headers);
+	MSGPACK_DEFINE(sender, messageActionType, actionData, headers);
+};
+
+struct ConnectionData {
+	std::vector<std::string> publisherTo;
+	std::vector<std::string> subscriberTo;
+	MSGPACK_DEFINE(publisherTo, subscriberTo);
 };

@@ -4,6 +4,7 @@
 #include <unordered_set>
 
 struct ConnectedClient {
+	std::string clientId;
 	std::shared_ptr<sf::TcpSocket> clientSocket;
 	std::unordered_set<std::string> publisherTo;
 	std::unordered_set<std::string> subscriberTo;
