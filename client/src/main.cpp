@@ -1,6 +1,7 @@
 #include <iostream>
 #include <thread>
 #include <unordered_set>
+#include <chrono>
 #include "SFML/Network.hpp"
 #include "message/message.hpp"
 #include "message/message_serializer.hpp"
@@ -19,7 +20,7 @@ void showAllSent(Client& client);
 bool establishConnection(const Client& client);
 void printMessage(const Message& message);
 bool processMessage(Message& message);
-
+bool signalDisconnect(Client& client);
 
 int main() {
 	Client client;
@@ -30,6 +31,8 @@ int main() {
 	if (!isConnected) {
 		return EXIT_FAILURE;
 	}
+
+	client.clientSocket->setBlocking(false);
 
 	auto clientRef = std::ref(client);
 
@@ -51,9 +54,29 @@ int main() {
 	return EXIT_SUCCESS;
 }
 
-void signalDisconnect(Client& client) {
-	sf::Packet packet;
+bool signalDisconnect(Client& client) {
+	sf::Packet messagePacket;
+	Message disconnectMessage;
+	disconnectMessage.sender = client.clientId;
+	std::string serializedMessage;
 
+	try {
+		serializedMessage = serialize<Message>(disconnectMessage);
+		messagePacket << serializedMessage;
+		
+		if (client.clientSocket->send(messagePacket) != sf::Socket::Done) {
+			std::cerr << "Something went wrong with disconnecting, please try again" << std::endl;
+			return false;
+		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(500)); // sleep for 500 ms such that any potential unprocessed messages are handled
+
+		return true;
+	}
+	catch (const std::exception& ex) {
+		std::cerr << ex.what() << std::endl;
+		return false;
+	}
 }
 
 /*
@@ -126,6 +149,10 @@ void processCommand(const std::string& command, Client& client, bool& isConnecte
 			case 3:
 				showAllReceived(client);
 				break;
+			case 4: 
+				bool disconnectAttempt = signalDisconnect(client);
+				if (disconnectAttempt) { isConnected = false; }
+				return;
 		}
 	}
 	catch (std::exception& ex) {
@@ -136,31 +163,46 @@ void processCommand(const std::string& command, Client& client, bool& isConnecte
 void receiver(Client& client, bool& isConnected) {
 	while (isConnected) {
 		sf::Packet incomingMessage;
+		sf::Socket::Status status = client.clientSocket->receive(incomingMessage);
+
+		if (status == sf::Socket::Done) {
+			std::string data;
+			if (!(incomingMessage >> data)) {
+				std::cerr << "Error with parsing incoming message data" << std::endl;
+				continue;
+			}
+
+			if (data.empty()) {
+				std::cerr << "Incoming message data is empty" << std::endl;
+				continue;
+			}
+
+			Message message;
+
+			try {
+				message = deserialize<Message>(data);
+				processMessage(message);
+			}
+			catch (const std::exception& ex) {
+				std::cerr << ex.what() << std::endl;
+			}		
+		}
+		else if (status == sf::Socket::NotReady) {
+			// Do something with not ready
+		}
+		else if (status == sf::Socket::Disconnected) {
+			std::cout << "Disconnected from the server." << std::endl;
+			isConnected = false;
+			break;
+		}
+		else {
+			std::cerr << "Error occurred during receiving." << std::endl;
+		}
+
 		if (client.clientSocket->receive(incomingMessage) != sf::Socket::Done) {
 			std::cerr << "Issue with receiving a message, terminating client connection" << std::endl;
 			isConnected = false;
 			break;
-		}
-
-		std::string data;
-		if (!(incomingMessage >> data)) {
-			std::cerr << "Error with parsing incoming message data" << std::endl;
-			continue;
-		}
-
-		if (data.empty()) {
-			std::cerr << "Incoming message data is empty" << std::endl;
-			continue;
-		}
-
-		Message message;
-
-		try {
-			message = deserialize<Message>(data);
-			processMessage(message);
-		}
-		catch (const std::exception& ex) {
-			std::cerr << ex.what() << std::endl;
 		}
 	}
 }

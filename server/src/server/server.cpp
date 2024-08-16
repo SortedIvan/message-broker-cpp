@@ -122,6 +122,8 @@ bool Server::processMessage(Message& message) {
 			return false;
 		case Connect:
 			return false;
+		case Disconnect:
+			return handleClientDisconnect(message);
 		case SimpleMessage:
 			processResult = processSimpleMessage(message);
 			break;
@@ -178,9 +180,13 @@ void Server::processMessagesFromNonEmptyTopic(std::string topicId) {
 		// process message here, send to all connected clients
 		for (auto client : connectedClients) {
 			if (client.second.subscriberTo.find(topicId) != client.second.subscriberTo.end()) {
+
+				if (client.first == message.sender) {
+					continue; // Don't send message back to the sender
+				}
+
 				sf::Packet subscriberMessage;
 				std::string messageData = EMPTY_STR;
-				// serialize message into a string
 
 				try {
 					messageData = serialize<Message>(message);
@@ -256,4 +262,35 @@ void Server::createTopic(std::string topicId, int maxAllowedConnections) {
 	topicMap.insert({ topicId, topic });
 }
 
+bool Server::handleClientDisconnect(Message& message) {
+	if (connectedClients.find(message.sender) == connectedClients.end()) {
+		return true;
+	}
 
+	std::unordered_set<std::string> subscriberTo = connectedClients[message.sender].subscriberTo;
+	std::unordered_set<std::string> publisherTo = connectedClients[message.sender].publisherTo;
+
+	// make sure that any left-over messages are processed
+	for (std::string topic : subscriberTo) {
+		while (topicsBeingProcessed.find(topic) != topicsBeingProcessed.end()) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+			continue;
+		}
+	}
+	
+	message.actionData = "Client " + message.sender + " has disconnected";
+
+	// first, remove the client from the connectedClients map
+	connectedClients.erase(message.sender);
+
+	// Only then after, send the disconnect message (done to avoid race condition)
+	for (std::string topic : subscriberTo) {
+		topicMap[topic].messages.push(message);
+	}
+
+	for (std::string topic : publisherTo) {
+		topicMap[topic].messages.push(message);
+	}
+
+	return true;
+}

@@ -46,4 +46,5 @@ public:
     bool connectClient(Message& message, ConnectedClient& client);
     bool processSimpleMessage(Message& message);
     bool parsePacketIntoMessage(sf::Packet& packet, Message& message);
+    bool handleClientDisconnect(Message& message);
 };
