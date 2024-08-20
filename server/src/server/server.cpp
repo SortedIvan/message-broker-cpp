@@ -15,15 +15,7 @@ Server::Server(std::string _ip, unsigned int _port, const std::vector<std::pair<
 }
 
 Server::~Server() {
-	serverIsRunning = false;
-
-	// signal to all threads that server has shut down
-
-	for (int i = 0; i < serverClientThreads.size(); ++i) {
-		serverClientThreads[i].join();
-	}
-
-	sendServerShutdownMessageToClients("Server object has been destroyed");
+	termination();
 }
 
 void Server::serverLoop() {
@@ -50,6 +42,8 @@ void Server::serverLoop() {
 	for (int i = 0; i < serverClientThreads.size(); ++i) {
 		serverClientThreads[i].join();
 	}
+
+	topicProcessingThread.join();
 }
 
 /*
@@ -361,4 +355,15 @@ void Server::sendServerShutdownMessageToClients(std::string reason) {
 	disconnectMessage.messageActionType = ServerHasShutdown;
 	disconnectMessage.actionData = reason;
 	topicMap["server"].messages.push(disconnectMessage);
+}
+
+void Server::termination() {
+	// signal to all threads that server has shut down
+	for (int i = 0; i < serverClientThreads.size(); ++i) {
+		serverClientThreads[i].join();
+	}
+
+	sendServerShutdownMessageToClients("Server object has been destroyed");
+	serverIsRunning = false;
+	topicProcessingThread.join();
 }

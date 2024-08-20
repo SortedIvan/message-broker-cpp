@@ -9,6 +9,7 @@
 
 void initializePublisherSubscriberArrays(Client& client);
 void receiver(Client& client);
+void commandThreadUtil(Client& client);
 void processCommand(const std::string& command, Client& client);
 
 int main() {
@@ -33,14 +34,22 @@ int main() {
 	}
 
 	auto clientRef = std::ref(client);
-
 	std::thread receiverThread(receiver, clientRef);
-	// to do: make the commands be a seperate thread
+	std::thread commandThread(commandThreadUtil, clientRef);
 
+	while (client.clientIsConnected) {}
+
+	// command thread is blocking, stop it somehow
+	receiverThread.join();
+	commandThread.join();
+	return EXIT_SUCCESS;
+}
+
+void commandThreadUtil(Client& client) {
 	while (client.clientIsConnected) {
 		std::string command = "";
 		std::cout << "Please choose an option: " << std::endl;
-		std::cout << "1) - Send a message" << std::endl; 
+		std::cout << "1) - Send a message" << std::endl;
 		std::cout << "2) - View all sent" << std::endl;
 		std::cout << "3) - View all received" << std::endl;
 		std::cout << "4) - Disconnect" << std::endl;
@@ -49,9 +58,6 @@ int main() {
 		std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Clear newline character
 		processCommand(command, client);
 	}
-
-	receiverThread.join();
-	return EXIT_SUCCESS;
 }
 
 void processCommand(const std::string& command, Client& client) {

@@ -53,5 +53,6 @@ public:
     bool parsePacketIntoMessage(sf::Packet& packet, Message& message);
     bool handleClientDisconnect(Message& message);
     void sendServerShutdownMessageToClients(std::string reason);
+    void termination();
     
 };

@@ -6,15 +6,16 @@
 #include <iostream>
 
 int main() {
-    std::vector<std::pair<std::string, int>> topics = {
-        {"server", 1000},   // important topic, only serves to communicate global server messages
-        {"topic1", 10},     // every client subs to the server topic upon connection
+    std::vector<std::pair<std::string, int>> topics = 
+    {
+        {"server", 1000},   // topic that only serves to communicate global server messages
+        {"topic1", 10},   
         {"topic2", 2},
         {"topic3", 1}
     };
 
     Server server("127.0.0.1", 54000, topics);
     server.serverLoop();
-
+    server.termination();
     return EXIT_SUCCESS;
 }
