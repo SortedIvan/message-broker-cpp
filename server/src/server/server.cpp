@@ -1,10 +1,29 @@
 #include "server.hpp"
 #include "../src/message/message_serializer.hpp"
 
-Server::Server(std::string _ip, unsigned int _port) {
+Server::Server(std::string _ip, unsigned int _port, const std::vector<std::pair<std::string, int>>& topics) {
 	ip = _ip;
 	port = _port;
 	serverIsRunning = false;
+	topicProcessPool.initialize(4);
+
+	for (auto topic : topics) {
+		createTopic(topic.first, topic.second);
+	}
+
+	topicProcessingThread = std::thread(&Server::processNonEmptyTopicThreadAssignee, this);
+}
+
+Server::~Server() {
+	serverIsRunning = false;
+
+	// signal to all threads that server has shut down
+
+	for (int i = 0; i < serverClientThreads.size(); ++i) {
+		serverClientThreads[i].join();
+	}
+
+	sendServerShutdownMessageToClients("Server object has been destroyed");
 }
 
 void Server::serverLoop() {
@@ -23,7 +42,13 @@ void Server::serverLoop() {
 			continue;
 		}
 
-		std::thread(&Server::serverClientThread, this, std::move(client)).detach();
+		std::thread t(&Server::serverClientThread, this, client);
+		threadFinished.insert({ t.get_id(), false });
+		serverClientThreads.push_back(std::move(t));
+	}
+	
+	for (int i = 0; i < serverClientThreads.size(); ++i) {
+		serverClientThreads[i].join();
 	}
 }
 
@@ -47,27 +72,30 @@ void Server::serverClientThread(std::shared_ptr<sf::TcpSocket> clientSocket) {
 
 	if (!connectionParseResult) {
 		std::cerr << "Error parsing client connection message" << std::endl;
+		threadFinished[std::this_thread::get_id()] = true;
 		return;
 	}
 
 	if (connectionMessage.messageActionType != Connect) {
 		std::cerr << "Message not correct type" << std::endl;
+		threadFinished[std::this_thread::get_id()] = true;
 		return;
 	}
-
 
 	ConnectedClient connectedClient;
 	bool clientConnectionResult = connectClient(connectionMessage, connectedClient);
 
 	if (!clientConnectionResult) {
 		std::cerr << "Issue with connecting client" << std::endl;
+		threadFinished[std::this_thread::get_id()] = true;
 		return;
 	}
 
 	std::string clientId = connectionMessage.sender;
 	
-	if (clientId.size() != CLIENT_ID_SIZE) {
+	if (clientId.size() < CLIENT_ID_SIZE) {
 		std::cerr << "Incorrect client id size" << std::endl;
+		threadFinished[std::this_thread::get_id()] = true;
 		return;
 	}
 	
@@ -78,12 +106,15 @@ void Server::serverClientThread(std::shared_ptr<sf::TcpSocket> clientSocket) {
 	while (serverIsRunning) {
 		sf::Packet packet;
 
+		if (connectedClients.find(clientId) == connectedClients.end()) {
+			break;
+		}
+
 		connectedClient = connectedClients[clientId];
 
 		if (connectedClient.clientSocket->receive(packet) != sf::Socket::Done)
 		{
 			std::cerr << "Error with message receiving from client" << std::endl;
-			connectedClients.erase(clientId);
 			break;
 		}
 
@@ -92,8 +123,7 @@ void Server::serverClientThread(std::shared_ptr<sf::TcpSocket> clientSocket) {
 
 		if (!messageParseResult) {
 			std::cerr << "Client message could not be parsed correctly" << std::endl;
-			connectedClients.erase(clientId);
-			return;
+			break;
 		}
 
 		/*
@@ -105,12 +135,13 @@ void Server::serverClientThread(std::shared_ptr<sf::TcpSocket> clientSocket) {
 
 		if (!processingResult) {
 			std::cerr << "There was an error processing a message" << std::endl;
-			connectedClients.erase(clientId);
-			return;
+			break;
 		}
 
+		removeFinishedOrDeadThreads();
 	}
 
+	threadFinished[std::this_thread::get_id()] = true;
 	connectedClients.erase(clientId);
 }
 
@@ -137,11 +168,6 @@ bool Server::processMessage(Message& message) {
 	Simple message comes in the form of a string, does not need any further processing, just gets sent into the topic
 */
 bool Server::processSimpleMessage(Message& message) {
-
-	for (auto connectedClient : connectedClients) {
-		std::cout << connectedClient.second.publisherTo.size() << std::endl;
-	}
-
 	for (std::string topic : connectedClients[message.sender].publisherTo) {
 		if (topicMap.find(topic) == topicMap.end()) {
 			// topic got deleted externally/by another thread, continue;
@@ -163,6 +189,13 @@ bool Server::connectClient(Message& message, ConnectedClient& client) {
 
 		client.subscriberTo = std::unordered_set<std::string>(data.subscriberTo.begin(), data.subscriberTo.end());
 		client.publisherTo = std::unordered_set<std::string>(data.publisherTo.begin(), data.publisherTo.end());
+
+		if (client.publisherTo.find("server") != client.publisherTo.end()) {
+			// client is attempting to be a publisher to server topic
+			client.publisherTo.erase("server");
+		}
+
+		client.subscriberTo.insert("server"); // connect client to the global server topic
 		return true;
 	}
 	catch (std::exception& ex) {
@@ -170,7 +203,6 @@ bool Server::connectClient(Message& message, ConnectedClient& client) {
 	}
 	return false;
 }
-
 
 void Server::processMessagesFromNonEmptyTopic(std::string topicId) {
 	while (!topicMap[topicId].messages.empty()) {
@@ -196,6 +228,7 @@ void Server::processMessagesFromNonEmptyTopic(std::string topicId) {
 						// delete client here
 						std::cout << "Error sending message to client" << std::endl;
 					}
+					std::cout << "Sent" << std::endl;
 				}
 				catch (const std::exception& ex) {
 					std::cerr << ex.what() << std::endl;
@@ -209,10 +242,9 @@ void Server::processMessagesFromNonEmptyTopic(std::string topicId) {
 }
 
 /*
-	@dev uses a task thread to process a non empty topic
-	@todo make sure this uses a thread pool | make it an event based system, not constant looping
+	@dev uses a thread pool to assign non-empty queues as a task
 */ 
-void Server::processNonEmptyTopicThreadCreator() {
+void Server::processNonEmptyTopicThreadAssignee() {
 	while (serverIsRunning) {
 		for (auto& topic : topicMap) {
 
@@ -220,12 +252,11 @@ void Server::processNonEmptyTopicThreadCreator() {
 				topicsBeingProcessed.find(topic.first) == topicsBeingProcessed.end())
 			{
 				topicsBeingProcessed.insert(topic.first);
-				std::thread(&Server::processMessagesFromNonEmptyTopic, this, topic.first).detach();
+				topicProcessPool.addTask(&Server::processMessagesFromNonEmptyTopic,this, topic.first);
 			}
 		}
 	}
 }
-
 
 bool Server::parsePacketIntoMessage(sf::Packet& packet, Message& message) {
 	std::string data;
@@ -256,6 +287,11 @@ Header Server::processHeader(std::string headerContent) {
 }
 
 void Server::createTopic(std::string topicId, int maxAllowedConnections) {
+
+	if (topicId.size() < TOPIC_ID_SIZE) {
+		return;
+	}
+
 	Topic topic;
 	topic.maxAllowedConnections = maxAllowedConnections;
 	topic.topicId = topicId;
@@ -292,5 +328,37 @@ bool Server::handleClientDisconnect(Message& message) {
 		topicMap[topic].messages.push(message);
 	}
 
+	std::cout << "Client { " << message.sender << "} has disconnected" << std::endl;
+
 	return true;
+}
+
+void Server::removeFinishedOrDeadThreads() {
+	std::unordered_map<std::thread::id, bool>::iterator it;
+	std::vector<std::thread::id> markedForDeletion;
+
+	for (it = threadFinished.begin(); it != threadFinished.end(); it++)
+	{
+		if (it->second) {
+			for (int i = 0; i < serverClientThreads.size(); ++i) {
+				if (serverClientThreads[i].get_id() == it->first) {
+					serverClientThreads[i].join();
+					serverClientThreads.erase(serverClientThreads.begin() + i);
+					markedForDeletion.push_back(serverClientThreads[i].get_id());
+				}
+			}
+		}
+	}
+
+	for (int i = 0; i < markedForDeletion.size(); ++i) {
+		threadFinished.erase(markedForDeletion[i]);
+	}
+}
+
+void Server::sendServerShutdownMessageToClients(std::string reason) {
+	Message disconnectMessage;
+	disconnectMessage.sender = "server";
+	disconnectMessage.messageActionType = ServerHasShutdown;
+	disconnectMessage.actionData = reason;
+	topicMap["server"].messages.push(disconnectMessage);
 }

@@ -22,6 +22,10 @@ void ThreadPool::execute() {
 	}
 }
 
+ThreadPool::ThreadPool() {
+
+}
+
 ThreadPool::ThreadPool(int nrOfThreads) {
 	isRunning = true;
 	for (int i = 0; i < nrOfThreads; ++i) {
@@ -33,6 +37,16 @@ ThreadPool::ThreadPool(int nrOfThreads) {
 
 ThreadPool::~ThreadPool() {
 	terminate();
+}
+
+
+void ThreadPool::initialize(int nrOfThreads) {
+	isRunning = true;
+	for (int i = 0; i < nrOfThreads; ++i) {
+		pool.emplace_back(
+			std::thread(&ThreadPool::execute, this)
+		);
+	}
 }
 
 void ThreadPool::terminate() {

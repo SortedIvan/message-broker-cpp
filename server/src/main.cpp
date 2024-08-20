@@ -5,34 +5,16 @@
 #include <sstream>
 #include <iostream>
 
-#include "thread_pool/thread_pool.hpp"
-
-void task(int a) {
-    std::cout << std::this_thread::get_id() << " is working on: " << a << std::endl;
-}
-
-
 int main() {
-    //Server server("127.0.0.1", 54000);
-    //server.createTopic("topic1", 10);
-    //server.createTopic("topic2", 2);
-    //server.createTopic("topic3", 1);
-    //std::thread(&Server::processNonEmptyTopicThreadCreator, std::ref(server)).detach();
-    //server.serverLoop();
+    std::vector<std::pair<std::string, int>> topics = {
+        {"server", 1000},   // important topic, only serves to communicate global server messages
+        {"topic1", 10},     // every client subs to the server topic upon connection
+        {"topic2", 2},
+        {"topic3", 1}
+    };
 
-    ThreadPool pool(4);
+    Server server("127.0.0.1", 54000, topics);
+    server.serverLoop();
 
-    for (int i = 0; i < 10; ++i) {
-        pool.addTask(task, i);
-    }
-
-    // Wait for some time to let tasks complete
-    std::this_thread::sleep_for(std::chrono::seconds(1));
-
-    // Properly terminate the thread pool
-    pool.terminate();
-
-    std::cout << "Thread pool terminated." << std::endl;
-
-    return 0;
+    return EXIT_SUCCESS;
 }

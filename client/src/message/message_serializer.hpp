@@ -13,7 +13,6 @@ static T deserialize(std::string& data) {
     return deserializedObject;
 }
 
-
 // Serialize method for any type
 template <typename T>
 static std::string serialize(const T& data) {

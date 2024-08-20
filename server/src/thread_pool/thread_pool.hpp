@@ -16,9 +16,11 @@ private:
 public:
 	void execute();
 	void terminate();
+	void initialize(int nrOfThreads);
+	ThreadPool();
 	ThreadPool(int nrOfThreads);
 	~ThreadPool();
-
+	
 	template<class F, class... Args>
 	void addTask(F&& f, Args&&... args) {
 		auto task = std::bind(std::forward<F>(f), std::forward<Args>(args)...);

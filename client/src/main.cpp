@@ -7,38 +7,37 @@
 #include "message/message_serializer.hpp"
 #include "client/client.hpp"
 
-
-#define CLIENT_ID_SIZE 4
-
-Client initializeClient();
 void initializePublisherSubscriberArrays(Client& client);
-void receiver(Client& client, bool& isConnected);
-void processCommand(const std::string& command, Client& client, bool& isConnected);
-void sendMessage(Client& client, bool& isConnected);
-void showAllReceived(Client& client);
-void showAllSent(Client& client);
-bool establishConnection(const Client& client);
-void printMessage(const Message& message);
-bool processMessage(Message& message);
-bool signalDisconnect(Client& client);
+void receiver(Client& client);
+void processCommand(const std::string& command, Client& client);
 
 int main() {
-	Client client;
-	client = initializeClient();
+
+	std::string newClientId = "";
+	std::cout << "Enter client id: ";
+	std::cin >> newClientId;
+	std::cout << std::endl;
+
+	Client client(newClientId, "127.0.0.1", 54000);
+	if (!client.tryConnect()) {
+		std::cerr << "Error connecting client" << std::endl;
+		return EXIT_FAILURE;
+	}
+
 	initializePublisherSubscriberArrays(client);
-	bool isConnected = establishConnection(client);
 	
+	bool isConnected = client.tryEstablishClientIdentity();
+
 	if (!isConnected) {
 		return EXIT_FAILURE;
 	}
 
-	client.clientSocket->setBlocking(false);
-
 	auto clientRef = std::ref(client);
 
-	std::thread(receiver, clientRef, std::ref(isConnected)).detach();
+	std::thread receiverThread(receiver, clientRef);
+	// to do: make the commands be a seperate thread
 
-	while (isConnected) {
+	while (client.clientIsConnected) {
 		std::string command = "";
 		std::cout << "Please choose an option: " << std::endl;
 		std::cout << "1) - Send a message" << std::endl; 
@@ -48,90 +47,14 @@ int main() {
 
 		std::cin >> command;
 		std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Clear newline character
-		processCommand(command, client, isConnected);
+		processCommand(command, client);
 	}
 
+	receiverThread.join();
 	return EXIT_SUCCESS;
 }
 
-bool signalDisconnect(Client& client) {
-	sf::Packet messagePacket;
-	Message disconnectMessage;
-	disconnectMessage.sender = client.clientId;
-	std::string serializedMessage;
-
-	try {
-		serializedMessage = serialize<Message>(disconnectMessage);
-		messagePacket << serializedMessage;
-		
-		if (client.clientSocket->send(messagePacket) != sf::Socket::Done) {
-			std::cerr << "Something went wrong with disconnecting, please try again" << std::endl;
-			return false;
-		}
-
-		std::this_thread::sleep_for(std::chrono::milliseconds(500)); // sleep for 500 ms such that any potential unprocessed messages are handled
-
-		return true;
-	}
-	catch (const std::exception& ex) {
-		std::cerr << ex.what() << std::endl;
-		return false;
-	}
-}
-
-/*
-	Sends a simple message into the message queue
-*/
-void sendMessage(Client& client, bool& isConnected) {
-	sf::Packet messagePacket;
-	std::string data = "";
-	std::cout << "Input message data: ";
-	std::getline(std::cin, data); // Read full line including spaces
-	std::cout << std::endl;
-
-	if (data.empty()) {
-		std::cout << "No message entered." << std::endl;
-		return;
-	}
-
-	Message message;
-	message.sender = client.clientId;
-	message.messageActionType = SimpleMessage;
-	message.actionData = data;
-
-	std::string serializedMessage = serialize<Message>(message);
-
-	messagePacket << serializedMessage;
-	
-	if (client.clientSocket->send(messagePacket) != sf::Socket::Done) {
-		std::cerr << "Problem with appending message to queue, breaking connection" << std::endl;
-		isConnected = false;
-		return;
-	}
-
-	std::cout << "Message appended to queue successfully" << std::endl;
-	client.messageSentHistory.push_back(message);
-}
-
-void showAllReceived(Client& client) {
-	for (int i = 0; i < client.messageReceivedHistory.size(); ++i) {
-		printMessage(client.messageReceivedHistory[i]);
-	}
-}
-
-void printMessage(const Message& message) {
-	std::cout << "---------- Message ------------" << std::endl;
-	std::cout << "Sender: " << message.sender << std::endl;
-	std::cout << "Message data" << message.actionData << std::endl;
-}
-
-void showAllSent(Client& client) {
-	for (int i = 0; i < client.messageSentHistory.size(); ++i) {
-		printMessage(client.messageReceivedHistory[i]);
-	}
-}
-
-void processCommand(const std::string& command, Client& client, bool& isConnected) {
+void processCommand(const std::string& command, Client& client) {
 	try {
 		if (command.size() != 1
 			|| std::stoi(command) > 9 || std::stoi(command) < 1) {
@@ -141,17 +64,17 @@ void processCommand(const std::string& command, Client& client, bool& isConnecte
 
 		switch (std::stoi(command)) {
 			case 1:
-				sendMessage(client, isConnected);
+				client.sendMessage();
 				break;
 			case 2:
-				showAllSent(client);
+				client.showAllSent();
 				break;
 			case 3:
-				showAllReceived(client);
+				client.showAllReceived();
 				break;
 			case 4: 
-				bool disconnectAttempt = signalDisconnect(client);
-				if (disconnectAttempt) { isConnected = false; }
+				bool disconnectAttempt = client.signalDisconnect();
+				if (disconnectAttempt) {}
 				return;
 		}
 	}
@@ -160,8 +83,8 @@ void processCommand(const std::string& command, Client& client, bool& isConnecte
 	}
 }
 
-void receiver(Client& client, bool& isConnected) {
-	while (isConnected) {
+void receiver(Client& client) {
+	while (client.clientIsConnected) {
 		sf::Packet incomingMessage;
 		sf::Socket::Status status = client.clientSocket->receive(incomingMessage);
 
@@ -181,7 +104,7 @@ void receiver(Client& client, bool& isConnected) {
 
 			try {
 				message = deserialize<Message>(data);
-				processMessage(message);
+				client.processMessage(message);
 			}
 			catch (const std::exception& ex) {
 				std::cerr << ex.what() << std::endl;
@@ -192,63 +115,13 @@ void receiver(Client& client, bool& isConnected) {
 		}
 		else if (status == sf::Socket::Disconnected) {
 			std::cout << "Disconnected from the server." << std::endl;
-			isConnected = false;
+			client.clientIsConnected = false;
 			break;
 		}
 		else {
 			std::cerr << "Error occurred during receiving." << std::endl;
 		}
-
-		if (client.clientSocket->receive(incomingMessage) != sf::Socket::Done) {
-			std::cerr << "Issue with receiving a message, terminating client connection" << std::endl;
-			isConnected = false;
-			break;
-		}
 	}
-}
-
-bool processMessage(Message& message) {
-	switch (message.messageActionType) {
-		case None:
-			return false;
-		case SimpleMessage:
-			std::cout << "Client: " << message.sender << " has sent {" << message.actionData << "}" << std::endl;
-			return true;
-		case Connect:
-			return true;
-		case Disconnect:
-			return true;
-	}
-}
-
-bool establishConnection(const Client& client) {
-	ConnectionData connectionData;
-	connectionData.publisherTo = std::vector<std::string>(client.publisherTo.begin(), client.publisherTo.end());
-	connectionData.subscriberTo = std::vector<std::string>(client.subscriberTo.begin(), client.subscriberTo.end());
-	std::string serializedData = serialize<ConnectionData>(connectionData);
-
-	if (serializedData.empty()) {
-		return false;
-	}
-
-	Message connectionMessage;
-	connectionMessage.sender = client.clientId;
-	connectionMessage.messageActionType =(int)Connect;
-	connectionMessage.actionData = serializedData;
-
-	std::string serializedMessage = serialize<Message>(connectionMessage);
-
-	sf::Packet connectionPacket;
-	connectionPacket << serializedMessage;
-
-	if (client.clientSocket->send(connectionPacket) != sf::Socket::Done) {
-		std::cerr << "There was an error connecting the client. Please try again" << std::endl;
-		return false;
-	}
-
-	std::cout << serializedMessage << std::endl;
-
-	return true;
 }
 
 void initializePublisherSubscriberArrays(Client& client) {
@@ -295,57 +168,4 @@ void initializePublisherSubscriberArrays(Client& client) {
 
 	client.publisherTo = publisherTo;
 	client.subscriberTo = subscriberTo;
-}
-
-Client initializeClient() {
-	bool clientInitialized = false;
-	bool clientIdCorrect = false;
-	bool clientIpCorrect = false;
-
-	Client client;
-	std::string clientIp = "";
-	std::string clientId = "";
-
-	while (!clientInitialized) {
-
-		if (!clientIdCorrect) {
-			std::cout << "Enter client id: ";
-			std::cin >> clientId;
-
-			if (clientId.size() != CLIENT_ID_SIZE) {
-				std::cout << "Wrong size client id, please enter the correct size: " << CLIENT_ID_SIZE << std::endl;
-				clientId = "";
-				clientIdCorrect = false;
-				continue;
-			}
-
-			clientIdCorrect = true;
-		}
-
-		if (!clientIpCorrect) {
-			std::cout << "Enter client ip: ";
-			std::cin >> clientIp;
-			clientIpCorrect = true;
-		}
-		else {
-			clientInitialized = true;
-		}
-	}
-
-	auto socket = std::make_shared<sf::TcpSocket>();
-	sf::IpAddress ip(clientIp);
-	unsigned short port = 54000;
-
-	sf::Socket::Status status = socket->connect(ip, port);
-	if (status != sf::Socket::Done)
-	{
-		std::cerr << "Error connecting client" << std::endl;
-		return client;
-	}
-
-	client.clientInitialized = true;
-	client.clientId = clientId;
-	client.clientSocket = socket;
-
-	return client;
 }

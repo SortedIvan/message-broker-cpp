@@ -12,7 +12,8 @@ enum MessageActionType {
 	None = 0,
 	Connect = 1,
 	Disconnect = 2, 
-	SimpleMessage = 3
+	SimpleMessage = 3,
+	ServerHasShutdown = 4
 };
 
 struct Header {
