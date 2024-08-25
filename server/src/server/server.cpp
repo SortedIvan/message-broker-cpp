@@ -93,6 +93,9 @@ void Server::serverClientThread(std::shared_ptr<sf::TcpSocket> clientSocket) {
 		return;
 	}
 	
+	Message clientDisconnectMessage;
+	clientDisconnectMessage.sender = clientId;
+
 	connectedClient.clientId = clientId;
 	connectedClient.clientSocket = std::move(clientSocket);
 	connectedClients.insert({ clientId, std::move(connectedClient)});
@@ -109,6 +112,13 @@ void Server::serverClientThread(std::shared_ptr<sf::TcpSocket> clientSocket) {
 		if (connectedClient.clientSocket->receive(packet) != sf::Socket::Done)
 		{
 			std::cerr << "Error with message receiving from client" << std::endl;
+			
+			bool disconnectResult = handleClientDisconnect(clientDisconnectMessage);
+
+			if (disconnectResult) {
+				return;
+			}
+
 			break;
 		}
 
@@ -309,18 +319,12 @@ bool Server::handleClientDisconnect(Message& message) {
 	}
 	
 	message.actionData = "Client " + message.sender + " has disconnected";
+	message.messageActionType = Disconnect;
 
 	// first, remove the client from the connectedClients map
 	connectedClients.erase(message.sender);
 
 	// Only then after, send the disconnect message (done to avoid race condition)
-	for (std::string topic : subscriberTo) {
-		topicMap[topic].messages.push(message);
-	}
-
-	for (std::string topic : publisherTo) {
-		topicMap[topic].messages.push(message);
-	}
 
 	std::cout << "Client { " << message.sender << "} has disconnected" << std::endl;
 

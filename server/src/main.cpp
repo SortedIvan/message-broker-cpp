@@ -8,7 +8,7 @@
 int main() {
     std::vector<std::pair<std::string, int>> topics = 
     {
-        {"server", 1000},   // topic that only serves to communicate global server messages
+        {SERVER_TOPIC, 1000},   // topic that only serves to communicate global server messages
         {"topic1", 10},   
         {"topic2", 2},
         {"topic3", 1}

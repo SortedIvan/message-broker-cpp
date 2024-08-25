@@ -17,6 +17,7 @@
 #define MESSAGE_ACTION_ID_SIZE 4 // there can be at most 9999 actions
 #define TOPIC_ID_SIZE 6
 #define EMPTY_STR ""
+#define SERVER_TOPIC "server"
 
 /*
     @param listener: Represents a TCP socket object that is configured to listen for new clients
