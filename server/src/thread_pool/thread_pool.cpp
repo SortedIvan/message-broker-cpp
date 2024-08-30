@@ -5,10 +5,20 @@ void ThreadPool::execute() {
 		std::function<void()> task;
 		{
 			std::unique_lock<std::mutex> lock(resourceGuard);
-			// Wait until there is a task or we need to stop
-			cv.wait(lock, [this] { return !isRunning  || !tasks.empty(); });
 
-			if (!isRunning && tasks.empty()) {
+			// Use a lambda expression for the condition variable awaiting and for the breaking condition
+			auto completedExpression = [this](bool usedForConditionVariable) -> bool {
+				if (usedForConditionVariable) {
+					return !isRunning || !tasks.empty();
+				}
+				else {
+					return !isRunning || tasks.empty();
+				}
+			};
+
+			cv.wait(lock, completedExpression(true));
+
+			if (completedExpression(false)) {
 				return; // Exit if stopping and no tasks left
 			}
 

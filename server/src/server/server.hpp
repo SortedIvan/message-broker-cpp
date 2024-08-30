@@ -27,6 +27,7 @@
 */
 class Server {
 private:
+    bool stateless = true;
     sf::TcpListener listener;
     sf::IpAddress ip;
     unsigned short port;
